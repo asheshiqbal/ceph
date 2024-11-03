@@ -1,0 +1,196 @@
+
+MON+ADM = 2 Nodes
+OSD = 3 Nodes
+Host entry in all Nodes
+
+
+***for MON nodes
+
+apt-cache madison cephadm
+
+apt-get install cephadm
+
+cephadm add-repo --release reef		// add latest repo
+
+apt-cache madison cephadm
+
+cephadm install		// update to latest
+
+cephadm version		// upto this in all mon nodes, to use all mon as admin
+
+cephadm bootstrap --mon-ip 192.168.0.131
+
+docker ps -a		// check
+
+cat /etc/ceph/ceph.conf
+cat /etc/ceph/ceph.client.admin.keyring
+cat /etc/ceph/ceph.pub
+
+ssh-copy-id -f -i /etc/ceph/ceph.pub root@mon02
+
+scp /etc/apt/sources.list.d/ceph.list root@mon02:/etc/apt/sources.list.d/ceph.list			// not rquired if cephadm is installed
+scp /etc/apt/trusted.gpg.d/ceph.release.gpg  root@mon02:/etc/apt/trusted.gpg.d/ceph.release.gpg		// not rquired if cephadm is installed
+ssh root@mon02 'apt-get update && apt-get install docker docker.io containerd -y'			// not required if cephadm is installed
+
+mon01:
+cephadm shell		// not required if ceph-common installed
+	ceph -s
+	ceph health details
+	ceph mgr module ls
+	ceph orch host ls
+	ceph orch host add mon02 192.168.0.132		// add new mon
+	ceph orch host label add mon02 _admin		// declare admin, will create /etc/ceph directory with conf and keyring
+
+mon02: 
+docker ps -a		// check
+cephadm shell		// check
+
+Dashboard > Cluster > Services > mon > placement = count:2 
+
+systemctl status ceph	// check
+
+
+***for OSD nodes, no need to install cephadm
+
+ssh-copy-id -f -i /etc/ceph/ceph.pub root@osd01
+scp /etc/apt/sources.list.d/ceph.list root@osd01:/etc/apt/sources.list.d/ceph.list
+scp /etc/apt/trusted.gpg.d/ceph.release.gpg  root@osd01:/etc/apt/trusted.gpg.d/ceph.release.gpg
+ssh root@osd01 'apt-get update && apt-get install docker docker.io containerd -y'
+
+mon01:
+cephadm shell
+	ceph orch host ls
+	ceph orch host add osd01 192.168.0.133
+	ceph orch device ls
+	ceph orch device ls --refresh
+	ceph orch apply osd --all-available-devices
+	ceph osd ls
+	ceph osd tree
+
+OSD nodes:
+vgs/vgdisplay	// separate vg for each OSD
+
+***Pool Creation
+	RBD: block, RGW: object, CephFS: native
+	default replica 3
+	PG (placement group) and CRUSH map defines location
+	rbdimage
+
+	ceph osd pool ls/ceph osd lspools	// .mgr is default reserved pool
+	ceph osd pool create <pool-name>
+	rbd pool init <pool-name>	// declare pool type as RBD
+	
+
+
+======================================================================
+
+
+#apt-get install ceph-common 
+#rbd pool init poolname 
+#rbd create disk1 --size 2G --pool poolname 
+# 
+
+#ceph-client 
+
+
+#apt-get install ceph-common -y 
+
+#scp to /etc/ceph/ 
+
+#rbd ls --pool poolname --id admin --keyring /etc/ceph/***** 
+
+#rbd map poolname/imagename 
+===========================================================================
+
+**At Client Node
+
+apt-get install ceph-common -y
+
+scp /etc/ceph/ceph.conf root@client01:/etc/ceph/ceph.conf
+scp /etc/ceph/ceph.client.admin.keyring root@client01:/etc/ceph/ceph.client.admin.keyring
+
+rbd ls --pool data --id admin --keyring=/etc/ceph/ceph.client.admin.keyring
+
+rbd create disk1 --pool data --size 2G
+
+rbd info disk1
+
+rbd map data/disk1
+
+vi /etc/ceph/rbdmap		//persistent mount
+	data/disk1	id=admin,keyring=/etc/ceph/ceph.client.admin.keyring
+vi /etc/fstab
+	/dev/	/mnt	xfs	_netdev
+
+
+==============================================================================================================
+        1. Create a pool for RBD
+        2. Enable Application(rbd,rgw,cephfs) for the specific pool
+        3. Create user and set privileges for specific pool (( admin+keyring)
+
+Client: ( Linux)
+
+        4. apt-get install ceph-common -y
+                (rbd)
+        5. copy ceph.conf and ceph.client.admin.keyring  from ceph-mon node to client's /etc/ceph/ceph.conf and /etc/ceph/ceph.client.admin.keyring
+
+        6. rbd ls --pool --id <> --keyring <>
+           #rbd ls --pool data --id admin --keyring=/etc/ceph/ceph.client.admin.keyring
+           #rbd ls --pool data
+        7. Create rbd image in data pool
+           #rbd create disk1 --pool data --size 2G
+           #rbd ls --pool data
+            #rbd info disk1
+        8. map the disk
+        #rbd map data/disk1  >> /dev/rbd0
+
+        9. create partition or create filesyste to whole disk /dev/rbd0
+        10. mount /dev/rbd0 to /mnt ( example)
+        11. reboot
+
+        for Persistent Mount
+
+
+        #cd /etc/ceph/
+        #vi rbdmap
+
+        data/disk1      id=admin,keyring=/etc/ceph/ceph.client.admin.keyring
+
+
+        #/dev/rbd/data/disk1
+
+        vi /etc/fstab
+
+
+
+        /dev/rbd/data/disk1             /mnt      xfs     _netdev       0 0
+
+        #reboot
+ceph osd ls
+ceph osd tree
+ceph osd pool ls
+ceph osd lspools
+ceph osd pool create pool1
+ceph osd pool ls
+ceph osd stats pool1
+eph osd pool get poolname all
+
+##How to Delete Pool ###
+
+#ceph config get mon mon_allow_delete_pool
+#ceph config set mon mon_allow_deletel_pool true
+
+#ceph osd pool delete pool1 pool1 --yes-i-really-really-mean-it
+
+
+
+#ceph osd pool create pool1
+#ceph osd pool get pool1
+#ceph osd pool set pool1 size 2
+
+#ceph osd pool application get pool1
+#ceph osd pool application enable {pool-name} {application-name}
+#rbd pool init pool1
+#ceph osd pool application get pool1
+========================================================================================================
+
